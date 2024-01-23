@@ -14,9 +14,11 @@
 
 const int BLOCK_SIZE = 256;
 
+#ifdef TEX_LOADS
 texture< int, 1, cudaReadModeElementType> texdataI1;
 texture<int2, 1, cudaReadModeElementType> texdataI2;
 texture<int4, 1, cudaReadModeElementType> texdataI4;
+#endif
 
 template<class T>
 class dev_fun{
@@ -360,9 +362,11 @@ double cachebenchGPU(double *c, long size, bool excel){
 	CUDA_SAFE_CALL( cudaMemset(cd, 0, size*sizeof(datatype)) );  // initialize to zeros
 
 	// Bind textures to buffer
+#ifdef TEX_LOADS
 	cudaBindTexture(0, texdataI1, cd, size*sizeof(datatype));
 	cudaBindTexture(0, texdataI2, cd, size*sizeof(datatype));
 	cudaBindTexture(0, texdataI4, cd, size*sizeof(datatype));
+#endif
 
 	// Synchronize in order to wait for memory operations to finish
 	CUDA_SAFE_CALL( cudaDeviceSynchronize() );
@@ -420,9 +424,11 @@ double cachebenchGPU(double *c, long size, bool excel){
 	CUDA_SAFE_CALL( cudaMemcpy(c, cd, size*sizeof(datatype), cudaMemcpyDeviceToHost) );
 
 	// Unbind textures
+#ifdef TEX_LOADS
 	cudaUnbindTexture(texdataI1);
 	cudaUnbindTexture(texdataI2);
 	cudaUnbindTexture(texdataI4);
+#endif
 
 	CUDA_SAFE_CALL( cudaFree(cd) );
 	return peak_bw;
