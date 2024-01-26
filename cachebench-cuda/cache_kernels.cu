@@ -14,12 +14,6 @@
 
 const int BLOCK_SIZE = 256;
 
-#ifdef TEX_LOADS
-texture< int, 1, cudaReadModeElementType> texdataI1;
-texture<int2, 1, cudaReadModeElementType> texdataI2;
-texture<int4, 1, cudaReadModeElementType> texdataI4;
-#endif
-
 template<class T>
 class dev_fun{
 public:
@@ -61,9 +55,6 @@ __device__ int dev_fun<int>::init(int v){
 template<>
 __device__ int dev_fun<int>::load(volatile const int* p, unsigned int offset){
 	int retval;
-#ifdef TEX_LOADS
-	retval = tex1Dfetch(texdataI1, offset);
-#else
 	p += offset;
 	// Cache Operators for Memory Load Instructions
 	// .ca Cache at all levels, likely to be accessed again.
@@ -76,7 +67,6 @@ __device__ int dev_fun<int>::load(volatile const int* p, unsigned int offset){
 #else
 	// All cache levels utilized
 	asm volatile ("ld.ca.u32 %0, [%1];" : "=r"(retval) : "l"(p));
-#endif
 #endif
 	return retval;
 }
@@ -124,9 +114,6 @@ __device__ int2 dev_fun<int2>::load(volatile const int2* p, unsigned int offset)
 		unsigned long long ll;
 		int2 i2;
 	} retval;
-#ifdef TEX_LOADS
-	retval.i2 = tex1Dfetch(texdataI2, offset);
-#else
 	p += offset;
 #ifdef L2_ONLY
 	// Global level caching
@@ -134,7 +121,6 @@ __device__ int2 dev_fun<int2>::load(volatile const int2* p, unsigned int offset)
 #else
 	// All cache levels utilized
 	asm volatile ("ld.ca.u64 %0, [%1];" : "=l"(retval.ll) : "l"(p));
-#endif
 #endif
 	return retval.i2;
 }
@@ -178,9 +164,6 @@ __device__ int4 dev_fun<int4>::init(int v){
 template<>
 __device__ int4 dev_fun<int4>::load(volatile const int4* p, unsigned int offset){
 	int4 retval;
-#ifdef TEX_LOADS
-	retval = tex1Dfetch(texdataI4, offset);
-#else
 	p += offset;
 #ifdef L2_ONLY
 	// Global level caching
@@ -188,7 +171,6 @@ __device__ int4 dev_fun<int4>::load(volatile const int4* p, unsigned int offset)
 #else
 	// All cache levels utilized
 	asm volatile ("ld.ca.v4.u32 {%0,%1,%2,%3}, [%4];" : "=r"(retval.x), "=r"(retval.y), "=r"(retval.z), "=r"(retval.w) : "l"(p));
-#endif
 #endif
 	return retval;
 }
@@ -223,30 +205,19 @@ __global__ void benchmark_func(T * const g_data){
 	for(int j=0; j<TOTAL_ITERATIONS; j+=UNROLL_ITERATIONS){
 		// Pretend updating of offset in order to force repetitive loads
 		offset = func(temp, offset);
-#ifndef TEX_LOADS
 		union {
 			const T *ptr;
 			int2 i;
 		} g_data_load_ptr = { g_data+offset };
-#endif
 		/*volatile*/ T * const g_data_store_ptr = g_data+offset+grid_data_width;
 #pragma unroll
 		for(int i=0; i<UNROLL_ITERATIONS; i++){
 			const unsigned int iteration_offset = (readonly ? i : i >> 1) % stepwidth;//readonly ? i % stepwidth : (i >> 1) % stepwidth;
 			if( readonly || (i % 2 == 0) ){
-#ifdef TEX_LOADS
-				const T v = func.load(g_data, offset+iteration_offset*stride);
-#else
 				const T v = func.load(g_data_load_ptr.ptr, iteration_offset*stride);
-#endif
 				if( readonly ){
-#ifdef TEX_LOADS
-					// Pretend update of offset in order to force reloads
-					offset ^= func.reduce(v);
-#else
 					// Pretend update of data pointer in order to force reloads
 					g_data_load_ptr.i.x ^= func.reduce(v);
-#endif
 				}
 				temp = v;
 			} else
@@ -362,11 +333,6 @@ double cachebenchGPU(double *c, long size, bool excel){
 	CUDA_SAFE_CALL( cudaMemset(cd, 0, size*sizeof(datatype)) );  // initialize to zeros
 
 	// Bind textures to buffer
-#ifdef TEX_LOADS
-	cudaBindTexture(0, texdataI1, cd, size*sizeof(datatype));
-	cudaBindTexture(0, texdataI2, cd, size*sizeof(datatype));
-	cudaBindTexture(0, texdataI4, cd, size*sizeof(datatype));
-#endif
 
 	// Synchronize in order to wait for memory operations to finish
 	CUDA_SAFE_CALL( cudaDeviceSynchronize() );
@@ -424,12 +390,6 @@ double cachebenchGPU(double *c, long size, bool excel){
 	CUDA_SAFE_CALL( cudaMemcpy(c, cd, size*sizeof(datatype), cudaMemcpyDeviceToHost) );
 
 	// Unbind textures
-#ifdef TEX_LOADS
-	cudaUnbindTexture(texdataI1);
-	cudaUnbindTexture(texdataI2);
-	cudaUnbindTexture(texdataI4);
-#endif
-
 	CUDA_SAFE_CALL( cudaFree(cd) );
 	return peak_bw;
 }
@@ -438,11 +398,7 @@ extern "C" void cachebenchGPU(double *c, long size, bool excel){
 #ifdef L2_ONLY
 	printf("Global cache benchmark (L2 cache)\n");
 #else
-#ifdef TEX_LOADS
-	printf("Texture cache benchmark\n");
-#else
 	printf("Whole cache hierarchy benchmark (L1 & L2 caches)\n");
-#endif
 #endif
 
 	printf("\nRead only benchmark\n");
